@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from evalforge.config import get_settings
-from evalforge.models.db import Base
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -54,10 +53,3 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
-
-
-async def init_db() -> None:
-    """Create all database tables (for dev / test environments)."""
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
