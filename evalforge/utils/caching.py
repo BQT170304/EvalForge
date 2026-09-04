@@ -21,9 +21,15 @@ class EvaluationCache:
         self._memory_cache: dict[str, dict[str, Any]] = {}
         self._max_memory_entries = 5000
         self._redis_client: aioredis.Redis | None = None
+        self._redis_unavailable = False
         self._redis_url = redis_url or str(get_settings().redis_url)
 
     async def _get_redis(self) -> aioredis.Redis | None:
+        # ponytail: one-shot probe. Without it a down Redis costs a 2s connect
+        # attempt on every single metric evaluation. A process restart re-probes;
+        # add a retry window if Redis restarts are common in your deployment.
+        if self._redis_unavailable:
+            return None
         if self._redis_client is None:
             try:
                 self._redis_client = aioredis.from_url(
@@ -36,6 +42,7 @@ class EvaluationCache:
             except Exception as e:
                 logger.debug("Redis cache unavailable, falling back to memory", error=str(e))
                 self._redis_client = None
+                self._redis_unavailable = True
         return self._redis_client
 
     @staticmethod
@@ -49,6 +56,13 @@ class EvaluationCache:
             "output": test_case.output,
             "expected_output": test_case.expected_output,
             "context": sorted(test_case.context) if test_case.context else None,
+            # Agent metrics score the trajectory and the latency/cost checkers score
+            # those fields, so every input a metric can read belongs in the key.
+            "tool_calls": test_case.tool_calls,
+            "trajectory": test_case.trajectory,
+            "metadata": test_case.metadata,
+            "latency_ms": test_case.latency_ms,
+            "cost_usd": test_case.cost_usd,
             "config": config or {},
         }
         encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
