@@ -1,0 +1,82 @@
+version: "3.8"
+
+services:
+  # PostgreSQL with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: evalforge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-evalforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-evalforge}
+      POSTGRES_DB: ${POSTGRES_DB:-evalforge}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evalforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Celery broker & result caching
+  redis:
+    image: redis:7-alpine
+    container_name: evalforge-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # EvalForge FastAPI REST API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: evalforge-api
+    restart: unless-stopped
+    command: uvicorn evalforge.main:app --host 0.0.0.0 --port 8080 --workers 4
+    ports:
+      - "8080:8080"
+    environment:
+      - EVALFORGE_ENV=development
+      - EVALFORGE_DATABASE_URL=postgresql+asyncpg://evalforge:evalforge@postgres:5432/evalforge
+      - EVALFORGE_REDIS_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Celery Worker for background evaluation tasks
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: evalforge-worker
+    restart: unless-stopped
+    command: celery -A evalforge.tasks.celery_app.celery_app worker --loglevel=info --concurrency=4 -Q evaluations,experiments
+    environment:
+      - EVALFORGE_ENV=development
+      - EVALFORGE_DATABASE_URL=postgresql+asyncpg://evalforge:evalforge@postgres:5432/evalforge
+      - EVALFORGE_REDIS_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
