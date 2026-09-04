@@ -42,7 +42,9 @@ services:
       dockerfile: Dockerfile
     container_name: evalforge-api
     restart: unless-stopped
-    command: uvicorn evalforge.main:app --host 0.0.0.0 --port 8080 --workers 4
+    # Only the api service migrates. The worker touches the DB only once a task
+    # arrives, which requires the api to be up, so concurrent upgrades would race.
+    command: sh -c "alembic upgrade head && uvicorn evalforge.main:app --host 0.0.0.0 --port 8080 --workers 4"
     ports:
       - "8080:8080"
     environment:
