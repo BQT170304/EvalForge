@@ -14,6 +14,7 @@ uv run pytest tests/unit                 # fast loop; integration needs Postgres
 uv run ruff check --fix . && uv run ruff format .
 uv run mypy evalforge                    # strict mode — must stay clean
 uv run uvicorn evalforge.main:app --reload
+alembic upgrade head                     # schema; needs a reachable Postgres
 docker-compose up -d --build             # full stack
 ```
 
@@ -35,6 +36,9 @@ evalforge/
 ├── tasks/           celery_app + evaluation_tasks, experiment_tasks
 ├── utils/           llm_client (LiteLLM), embeddings, caching
 └── models/          db.py (SQLAlchemy), schemas.py (Pydantic DTOs)
+
+alembic/             env.py reuses evalforge.db.session.get_engine + Settings
+└── versions/        0001_baseline.py — snapshot of models/db.py
 ```
 
 ## Gotchas
@@ -45,4 +49,7 @@ evalforge/
 - **Auth bypass in dev:** `verify_api_key` returns `"dev-user"` when `settings.is_development` and no `X-API-Key` header. Don't rely on that path in tests that assert auth.
 - **Metric failures must not kill a batch.** Wrap third-party engine errors (DeepEval / RAGAS / LiteLLM) into a failed `MetricResult` with a reason instead of raising.
 - **Heavy models are singletons.** Sentence transformers / BERTScore live in `utils/embeddings.py` — never instantiate per test case.
+- **Schema is Alembic's, not `create_all`'s.** `init_db()` is gone; the api container runs `alembic upgrade head` before uvicorn. After changing `models/db.py`, generate a revision — the baseline was rendered from metadata against an empty DB, so it has never been applied to a real Postgres by this repo's history.
+- **Every evaluation goes through the cache.** `orchestrator.evaluate` keys on metric name + full test case + metric kwargs. Failed results are deliberately not cached. A metric whose score depends on anything outside `EvalTestCase` will serve stale results.
+- **Duplicate metric aliases are intentional.** `bleu_score` / `BLEUScore` etc. register the same class twice; the last decorator wins for `cls.name`, so `MetricResult.metric_name` reports the CamelCase alias whichever key you asked for.
 - `.env` is gitignored; `.env.example` is the contract. Update it when adding a setting.
