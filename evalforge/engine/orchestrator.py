@@ -3,6 +3,14 @@ import time
 from typing import Any
 
 import structlog
+from opentelemetry import trace
+
+from evalforge.observability.metrics import (
+    eval_cost_usd_total,
+    eval_latency_ms,
+    eval_requests_total,
+    metric_failures_total,
+)
 
 from .base import (
     EvalTestCase,
@@ -14,6 +22,7 @@ from .base import (
 from .registry import MetricRegistry
 
 logger = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 class EvaluationOrchestrator:
@@ -45,26 +54,39 @@ class EvaluationOrchestrator:
                 logger.error("failed_to_load_metric", metric=name, error=str(e))
 
         async def run_metric(metric: Any) -> MetricResult:
+            metric_name = getattr(metric, "name", "unknown")
             start_time = time.time()
-            try:
-                res: MetricResult = await metric.evaluate(test_case)
-                return res
-            except Exception as e:
-                logger.error(
-                    "metric_evaluation_failed",
-                    metric=getattr(metric, "name", "unknown"),
-                    error=str(e),
-                )
-                return MetricResult(
-                    metric_name=getattr(metric, "name", "unknown"),
-                    score=0.0,
-                    passed=False,
-                    threshold=getattr(metric, "threshold", 0.5),
-                    reason=f"Evaluation failed: {e!s}",
-                    source=getattr(metric, "source", MetricSource.BUILTIN),
-                    category=getattr(metric, "category", MetricCategory.DETERMINISTIC),
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
+            with tracer.start_as_current_span(
+                "evalforge.metric.evaluate",
+                attributes={"evalforge.metric_name": metric_name},
+            ) as span:
+                try:
+                    res: MetricResult = await metric.evaluate(test_case)
+                    duration_ms = (time.time() - start_time) * 1000
+                    eval_requests_total.add(1, {"metric_name": metric_name})
+                    eval_latency_ms.record(duration_ms, {"metric_name": metric_name})
+                    eval_cost_usd_total.add(res.cost_usd, {"metric_name": metric_name})
+                    span.set_attribute("evalforge.score", res.score)
+                    span.set_attribute("evalforge.passed", res.passed)
+                    return res
+                except Exception as e:
+                    metric_failures_total.add(1, {"metric_name": metric_name})
+                    span.record_exception(e)
+                    logger.error(
+                        "metric_evaluation_failed",
+                        metric=metric_name,
+                        error=str(e),
+                    )
+                    return MetricResult(
+                        metric_name=metric_name,
+                        score=0.0,
+                        passed=False,
+                        threshold=getattr(metric, "threshold", 0.5),
+                        reason=f"Evaluation failed: {e!s}",
+                        source=getattr(metric, "source", MetricSource.BUILTIN),
+                        category=getattr(metric, "category", MetricCategory.DETERMINISTIC),
+                        latency_ms=(time.time() - start_time) * 1000,
+                    )
 
         results = await asyncio.gather(*(run_metric(m) for m in resolved_metrics))
         return list(results)
