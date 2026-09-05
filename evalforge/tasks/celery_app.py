@@ -3,6 +3,13 @@
 import os
 
 from celery import Celery
+from celery.signals import worker_process_init
+from opentelemetry.instrumentation.celery import CeleryInstrumentor
+from opentelemetry.instrumentation.redis import RedisInstrumentor
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+
+from evalforge.observability.logging import configure_structlog
+from evalforge.observability.otel import configure_observability
 
 REDIS_URL = os.getenv("EVALFORGE_REDIS_URL", "redis://localhost:6379/0")
 
@@ -30,3 +37,13 @@ celery_app.conf.update(
         "evalforge.tasks.evaluation_tasks.run_experiment_batch": {"queue": "experiments"},
     },
 )
+
+
+@worker_process_init.connect(weak=False)  # type: ignore[untyped-decorator]
+def _init_worker_observability(**kwargs: object) -> None:
+    """Configures OTel + structlog inside each forked Celery worker process."""
+    configure_structlog()
+    configure_observability()
+    CeleryInstrumentor().instrument()
+    SQLAlchemyInstrumentor().instrument()
+    RedisInstrumentor().instrument()
