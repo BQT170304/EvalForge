@@ -6,6 +6,7 @@ import pytest
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
 
 from evalforge.engine.base import EvalTestCase, MetricCategory, MetricResult, MetricSource
 from evalforge.engine.orchestrator import EvaluationOrchestrator
@@ -71,3 +72,4 @@ async def test_evaluate_records_exception_on_span_when_metric_fails(traced_orche
     assert len(finished_spans) == 1
     assert len(finished_spans[0].events) == 1
     assert finished_spans[0].events[0].name == "exception"
+    assert finished_spans[0].status.status_code == StatusCode.ERROR

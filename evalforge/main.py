@@ -14,7 +14,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
-from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
 from evalforge import __version__
 from evalforge.api.v1.router import api_v1_router
@@ -24,7 +23,6 @@ from evalforge.observability.otel import configure_observability
 
 configure_structlog()
 configure_observability()
-SQLAlchemyInstrumentor().instrument()
 RedisInstrumentor().instrument()
 
 logger = structlog.get_logger(__name__)

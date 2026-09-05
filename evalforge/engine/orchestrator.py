@@ -4,6 +4,7 @@ from typing import Any
 
 import structlog
 from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 
 from evalforge.observability.metrics import (
     eval_cost_usd_total,
@@ -72,6 +73,7 @@ class EvaluationOrchestrator:
                 except Exception as e:
                     metric_failures_total.add(1, {"metric_name": metric_name})
                     span.record_exception(e)
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
                     logger.error(
                         "metric_evaluation_failed",
                         metric=metric_name,

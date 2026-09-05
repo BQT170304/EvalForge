@@ -7,7 +7,7 @@ A .env file is automatically loaded if present.
 from enum import StrEnum
 from functools import lru_cache
 
-from pydantic import Field, PostgresDsn, RedisDsn
+from pydantic import AliasChoices, Field, PostgresDsn, RedisDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +32,10 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        # Needed so fields with an explicit validation_alias (langfuse_*) can
+        # still be populated by their plain field name via direct kwargs
+        # (e.g. in tests), in addition to their alias(es).
+        populate_by_name=True,
     )
 
     # --- Core ---
@@ -64,9 +68,21 @@ class Settings(BaseSettings):
     eval_timeout_seconds: int = 300
 
     # --- Monitoring Adapters ---
-    langfuse_public_key: str = ""
-    langfuse_secret_key: str = ""
-    langfuse_host: str = "https://cloud.langfuse.com"
+    # Langfuse vars accept both the unprefixed name (matching .env.example,
+    # docker-compose.yaml, docs/observability-setup.md, and the Langfuse SDK
+    # convention) and the EVALFORGE_-prefixed name (this project's convention).
+    langfuse_public_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("LANGFUSE_PUBLIC_KEY", "EVALFORGE_LANGFUSE_PUBLIC_KEY"),
+    )
+    langfuse_secret_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("LANGFUSE_SECRET_KEY", "EVALFORGE_LANGFUSE_SECRET_KEY"),
+    )
+    langfuse_host: str = Field(
+        default="https://cloud.langfuse.com",
+        validation_alias=AliasChoices("LANGFUSE_HOST", "EVALFORGE_LANGFUSE_HOST"),
+    )
     langsmith_api_key: str = ""
     langsmith_project: str = ""
     arize_api_key: str = ""

@@ -122,6 +122,10 @@ def install(providers: ObservabilityProviders) -> None:
 
     otel_handler = LoggingHandler(logger_provider=providers.logger_provider)
     otel_handler.name = "evalforge.otel"
+    # Exclude OTel's own internal loggers so the OTLP log exporter's failure
+    # logs (e.g. during a Grafana outage) don't get re-ingested and re-exported,
+    # which would otherwise create a self-feeding export loop.
+    otel_handler.addFilter(lambda record: not record.name.startswith("opentelemetry"))
     root_logger = logging.getLogger()
     root_logger.handlers = [
         h for h in root_logger.handlers if getattr(h, "name", None) != "evalforge.otel"
@@ -129,9 +133,25 @@ def install(providers: ObservabilityProviders) -> None:
     root_logger.addHandler(otel_handler)
 
 
+_configured_providers: ObservabilityProviders | None = None
+
+
 def configure_observability(settings: Settings | None = None) -> ObservabilityProviders:
-    """Builds and installs OTel providers from settings. Safe to call once per process."""
+    """Builds and installs OTel providers from settings.
+
+    Idempotent — safe to call more than once per process (e.g. Celery's
+    worker_process_init firing per fork). The first call builds and installs
+    the providers; subsequent calls return that same instance without
+    rebuilding or attempting to re-install (the OTel API refuses to override
+    already-set global providers and only logs a warning, so a naive
+    unconditional rebuild would silently return providers that were never
+    actually installed).
+    """
+    global _configured_providers
+    if _configured_providers is not None:
+        return _configured_providers
     resolved = settings or get_settings()
     providers = build_providers(resolved)
     install(providers)
+    _configured_providers = providers
     return providers

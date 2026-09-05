@@ -1,7 +1,10 @@
 """Tests for OTel provider construction — no real network calls are made."""
 
+import logging
+
 from evalforge.config import Settings
-from evalforge.observability.otel import build_providers
+from evalforge.observability import otel
+from evalforge.observability.otel import build_providers, configure_observability, install
 
 
 def _settings(**overrides: str) -> Settings:
@@ -75,3 +78,26 @@ def test_both_destinations_registers_two_trace_processors():
     )
 
     assert _span_processor_count(providers) == 2
+
+
+def test_configure_observability_is_idempotent(monkeypatch):
+    monkeypatch.setattr(otel, "_configured_providers", None)
+
+    first = configure_observability(_settings())
+    second = configure_observability(_settings())
+
+    assert first is second
+
+
+def test_otel_log_handler_filters_out_opentelemetry_internal_loggers():
+    install(build_providers(_settings()))
+
+    root_logger = logging.getLogger()
+    otel_handler = next(
+        h for h in root_logger.handlers if getattr(h, "name", None) == "evalforge.otel"
+    )
+    noisy_record = logging.LogRecord(
+        "opentelemetry.exporter.otlp.proto.http", logging.ERROR, "", 0, "export failed", None, None
+    )
+
+    assert otel_handler.filter(noisy_record) is False

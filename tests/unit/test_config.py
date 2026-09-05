@@ -27,3 +27,21 @@ def test_grafana_otlp_settings_read_from_env(monkeypatch):
     assert settings.grafana_otlp_endpoint == "https://otlp-gateway-prod-xx.grafana.net/otlp"
     assert settings.grafana_otlp_instance_id == "123456"
     assert settings.grafana_otlp_api_key == "glc_fake_token"
+
+
+def test_langfuse_public_key_reads_from_unprefixed_env_var(monkeypatch):
+    monkeypatch.delenv("EVALFORGE_LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-unprefixed")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.langfuse_public_key == "pk-lf-unprefixed"
+
+
+def test_langfuse_public_key_reads_from_prefixed_env_var(monkeypatch):
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.setenv("EVALFORGE_LANGFUSE_PUBLIC_KEY", "pk-lf-prefixed")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.langfuse_public_key == "pk-lf-prefixed"

@@ -56,6 +56,11 @@ LANGFUSE_HOST=https://cloud.langfuse.com
    `evalforge_eval_requests_total` for the counter.
 4. **Langfuse:** open your project's **Traces** tab — if the metric you
    ran included an LLM-judge call, you'll see an `evalforge.llm.complete`
-   generation with the model, token usage, and cost. Metrics that don't
-   call an LLM (e.g. `length_checker`) won't appear here — only Grafana
-   receives those, by design.
+   generation with the model name and token usage counts, plus a custom
+   `evalforge.cost_usd` metadata attribute (this is not Langfuse's native
+   cost tracking, so it won't render in Langfuse's built-in cost column —
+   it's just an attribute on the span). Prompts and completions are
+   intentionally **not** captured or sent to Langfuse, to avoid exporting
+   potentially sensitive evaluation payloads to a third party. Metrics that
+   don't call an LLM (e.g. `length_checker`) won't appear here — only
+   Grafana receives those, by design.
