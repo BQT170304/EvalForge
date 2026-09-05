@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     # --- OpenTelemetry ---
     otel_exporter_endpoint: str = "http://localhost:4317"
     otel_service_name: str = "evalforge"
+    grafana_otlp_endpoint: str = ""
+    grafana_otlp_instance_id: str = ""
+    grafana_otlp_api_key: str = ""
 
     @property
     def is_development(self) -> bool:
