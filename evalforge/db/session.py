@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -10,7 +11,6 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from evalforge.config import get_settings
-from evalforge.models.db import Base
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -28,6 +28,11 @@ def get_engine() -> AsyncEngine:
             max_overflow=settings.db_max_overflow,
             future=True,
         )
+        # Instrumenting the actual engine instance (rather than relying on the
+        # global SQLAlchemyInstrumentor().instrument() class-level patch) avoids
+        # an import-ordering footgun: create_async_engine may already be bound
+        # into other modules' globals before a global patch would apply.
+        SQLAlchemyInstrumentor().instrument(engine=_engine.sync_engine)
     return _engine
 
 
@@ -54,10 +59,3 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
-
-
-async def init_db() -> None:
-    """Create all database tables (for dev / test environments)."""
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)

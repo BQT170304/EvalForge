@@ -21,7 +21,6 @@ from evalforge.models.db import (
     ExperimentModel,
     ExperimentStatus,
 )
-from evalforge.utils.caching import get_cache
 from evalforge.utils.llm_client import get_llm_client
 
 logger = structlog.get_logger(__name__)
@@ -33,7 +32,6 @@ class ExperimentRunner:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.orchestrator = EvaluationOrchestrator()
-        self.cache = get_cache()
 
     async def create_experiment(
         self,

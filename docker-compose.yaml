@@ -42,13 +42,20 @@ services:
       dockerfile: Dockerfile
     container_name: evalforge-api
     restart: unless-stopped
-    command: uvicorn evalforge.main:app --host 0.0.0.0 --port 8080 --workers 4
+    # Only the api service migrates. The worker touches the DB only once a task
+    # arrives, which requires the api to be up, so concurrent upgrades would race.
+    command: sh -c "alembic upgrade head && uvicorn evalforge.main:app --host 0.0.0.0 --port 8080 --workers 4"
     ports:
       - "8080:8080"
     environment:
       - EVALFORGE_ENV=development
       - EVALFORGE_DATABASE_URL=postgresql+asyncpg://evalforge:evalforge@postgres:5432/evalforge
       - EVALFORGE_REDIS_URL=redis://redis:6379/0
+      - EVALFORGE_GRAFANA_OTLP_ENDPOINT=${EVALFORGE_GRAFANA_OTLP_ENDPOINT:-}
+      - EVALFORGE_GRAFANA_OTLP_INSTANCE_ID=${EVALFORGE_GRAFANA_OTLP_INSTANCE_ID:-}
+      - EVALFORGE_GRAFANA_OTLP_API_KEY=${EVALFORGE_GRAFANA_OTLP_API_KEY:-}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     depends_on:
@@ -69,6 +76,11 @@ services:
       - EVALFORGE_ENV=development
       - EVALFORGE_DATABASE_URL=postgresql+asyncpg://evalforge:evalforge@postgres:5432/evalforge
       - EVALFORGE_REDIS_URL=redis://redis:6379/0
+      - EVALFORGE_GRAFANA_OTLP_ENDPOINT=${EVALFORGE_GRAFANA_OTLP_ENDPOINT:-}
+      - EVALFORGE_GRAFANA_OTLP_INSTANCE_ID=${EVALFORGE_GRAFANA_OTLP_INSTANCE_ID:-}
+      - EVALFORGE_GRAFANA_OTLP_API_KEY=${EVALFORGE_GRAFANA_OTLP_API_KEY:-}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     depends_on:

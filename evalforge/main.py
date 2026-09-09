@@ -14,10 +14,18 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.redis import RedisInstrumentor
 
 from evalforge import __version__
 from evalforge.api.v1.router import api_v1_router
 from evalforge.config import get_settings
+from evalforge.observability.logging import configure_structlog
+from evalforge.observability.otel import configure_observability
+
+configure_structlog()
+configure_observability()
+RedisInstrumentor().instrument()
 
 logger = structlog.get_logger(__name__)
 
@@ -116,3 +124,4 @@ def create_app() -> FastAPI:
 
 # Application instance for uvicorn
 app = create_app()
+FastAPIInstrumentor.instrument_app(app)
