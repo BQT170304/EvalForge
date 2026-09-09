@@ -27,6 +27,40 @@ docker-compose up -d --build
 
 # 3. Check health
 curl http://localhost:8080/api/v1/health
+
+# 4. Build the frontend and open the Web UI Dashboard
+# The Docker image does not build the frontend yet — build it locally first
+# (see "Building Frontend for Production" below), then it is served at:
+# http://localhost:8080/
+```
+
+---
+
+## 💻 Web UI Frontend (Dark Blue Theme)
+
+EvalForge includes a modern single-page dashboard designed with a rich dark blue aesthetic (`#060d1f` / `#0a1535`):
+
+- **Observability Overview**: Real-time pass rates, P95 latencies, cost tracking, 5-layer pipeline breakdown, and interactive quality radar.
+- **Evaluation Playground**: Interactive test cases with customizable metric thresholds, regex/schema parameter tuning, RAG context chunks, and live score radar.
+- **Datasets & Ground Truth**: Versioned test cases inspector, import/export JSON, and synthetic test case generator.
+- **Experiments & Regressions**: Automated benchmark history, pass rate tracking, and prompt versioning.
+- **Model / Prompt Comparator**: Side-by-side metric diff matrix and winner spotlight.
+- **Metrics Catalog**: Searchable registry of all 25+ deterministic, NLP, LLM judge, RAG triad, and multi-agent metrics.
+- **Evaluation Reports**: Formatted Markdown reports with copy/export capabilities.
+
+### Running Frontend in Development Mode
+```bash
+cd frontend
+npm install
+npm run dev
+# Access Vite dev server at: http://localhost:5173
+```
+
+### Building Frontend for Production
+```bash
+cd frontend
+npm run build
+# Built into frontend/dist and served directly by FastAPI at http://localhost:8080/
 ```
 
 ### Running locally (without Docker)

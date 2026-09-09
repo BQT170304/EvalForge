@@ -7,11 +7,13 @@ exception handlers, and API routes.
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
 
@@ -95,6 +97,27 @@ def create_app() -> FastAPI:
 
     # --- Routes ---
     app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
+
+    # --- Frontend SPA Static Mount ---
+    frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    if frontend_dist.is_dir():
+        assets_dir = frontend_dist / "assets"
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+        api_prefix = settings.api_v1_prefix.lstrip("/")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_spa(full_path: str) -> Response:
+            if full_path.startswith(api_prefix):
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
+            target = frontend_dist / full_path
+            if target.is_file():
+                return FileResponse(str(target))
+            index_file = frontend_dist / "index.html"
+            if index_file.is_file():
+                return FileResponse(str(index_file))
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
     return app
 
