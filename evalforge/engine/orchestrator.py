@@ -3,7 +3,15 @@ import time
 from typing import Any
 
 import structlog
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 
+from evalforge.observability.metrics import (
+    eval_cost_usd_total,
+    eval_latency_ms,
+    eval_requests_total,
+    metric_failures_total,
+)
 from evalforge.utils.caching import get_cache
 
 from .base import (
@@ -16,6 +24,7 @@ from .base import (
 from .registry import MetricRegistry
 
 logger = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 class EvaluationOrchestrator:
@@ -49,32 +58,49 @@ class EvaluationOrchestrator:
         cache = get_cache()
 
         async def run_metric(metric: Any, m_kwargs: dict[str, Any]) -> MetricResult:
+            metric_name = getattr(metric, "name", "unknown")
             start_time = time.time()
-            cache_key = cache.generate_cache_key(metric.name, test_case, m_kwargs)
-            cached = await cache.get(cache_key)
-            if cached is not None:
-                logger.debug("metric_cache_hit", metric=metric.name)
-                return cached
-            try:
-                res: MetricResult = await metric.evaluate(test_case)
-                await cache.set(cache_key, res)
-                return res
-            except Exception as e:
-                logger.error(
-                    "metric_evaluation_failed",
-                    metric=getattr(metric, "name", "unknown"),
-                    error=str(e),
-                )
-                return MetricResult(
-                    metric_name=getattr(metric, "name", "unknown"),
-                    score=0.0,
-                    passed=False,
-                    threshold=getattr(metric, "threshold", 0.5),
-                    reason=f"Evaluation failed: {e!s}",
-                    source=getattr(metric, "source", MetricSource.BUILTIN),
-                    category=getattr(metric, "category", MetricCategory.DETERMINISTIC),
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
+            with tracer.start_as_current_span(
+                "evalforge.metric.evaluate",
+                attributes={"evalforge.metric_name": metric_name},
+            ) as span:
+                cache_key = cache.generate_cache_key(metric_name, test_case, m_kwargs)
+                cached = await cache.get(cache_key)
+                if cached is not None:
+                    logger.debug("metric_cache_hit", metric=metric_name)
+                    span.set_attribute("evalforge.cache_hit", True)
+                    span.set_attribute("evalforge.score", cached.score)
+                    span.set_attribute("evalforge.passed", cached.passed)
+                    return cached
+                try:
+                    res: MetricResult = await metric.evaluate(test_case)
+                    await cache.set(cache_key, res)
+                    duration_ms = (time.time() - start_time) * 1000
+                    eval_requests_total.add(1, {"metric_name": metric_name})
+                    eval_latency_ms.record(duration_ms, {"metric_name": metric_name})
+                    eval_cost_usd_total.add(res.cost_usd, {"metric_name": metric_name})
+                    span.set_attribute("evalforge.score", res.score)
+                    span.set_attribute("evalforge.passed", res.passed)
+                    return res
+                except Exception as e:
+                    metric_failures_total.add(1, {"metric_name": metric_name})
+                    span.record_exception(e)
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    logger.error(
+                        "metric_evaluation_failed",
+                        metric=metric_name,
+                        error=str(e),
+                    )
+                    return MetricResult(
+                        metric_name=metric_name,
+                        score=0.0,
+                        passed=False,
+                        threshold=getattr(metric, "threshold", 0.5),
+                        reason=f"Evaluation failed: {e!s}",
+                        source=getattr(metric, "source", MetricSource.BUILTIN),
+                        category=getattr(metric, "category", MetricCategory.DETERMINISTIC),
+                        latency_ms=(time.time() - start_time) * 1000,
+                    )
 
         results = await asyncio.gather(*(run_metric(m, kw) for m, kw in resolved_metrics))
         return list(results)

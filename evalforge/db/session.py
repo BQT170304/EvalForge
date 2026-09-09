@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -27,6 +28,11 @@ def get_engine() -> AsyncEngine:
             max_overflow=settings.db_max_overflow,
             future=True,
         )
+        # Instrumenting the actual engine instance (rather than relying on the
+        # global SQLAlchemyInstrumentor().instrument() class-level patch) avoids
+        # an import-ordering footgun: create_async_engine may already be bound
+        # into other modules' globals before a global patch would apply.
+        SQLAlchemyInstrumentor().instrument(engine=_engine.sync_engine)
     return _engine
 
 

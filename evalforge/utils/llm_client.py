@@ -6,10 +6,12 @@ from typing import Any
 import litellm
 import structlog
 from litellm import acompletion, completion_cost
+from opentelemetry import trace
 
 from evalforge.config import get_settings
 
 logger = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 # Suppress noisy LiteLLM logs in standard runs
 litellm.suppress_debug_info = True
@@ -50,53 +52,70 @@ class LiteLLMClient:
         attempt = 0
         last_err: Exception | None = None
 
-        while attempt < max_retries:
-            try:
-                params: dict[str, Any] = {
-                    "model": selected_model,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    **kwargs,
-                }
-                if response_format:
-                    params["response_format"] = response_format
-
-                response = await acompletion(**params)
-
-                content = response.choices[0].message.content or ""
+        with tracer.start_as_current_span(
+            "evalforge.llm.complete",
+            attributes={
+                "gen_ai.system": "litellm",
+                "gen_ai.request.model": selected_model,
+            },
+        ) as span:
+            while attempt < max_retries:
                 try:
-                    cost = completion_cost(completion_response=response)
-                except Exception:
-                    cost = 0.0
+                    params: dict[str, Any] = {
+                        "model": selected_model,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        **kwargs,
+                    }
+                    if response_format:
+                        params["response_format"] = response_format
 
-                usage = getattr(response, "usage", None)
-                total_tokens = usage.total_tokens if usage else 0
+                    response = await acompletion(**params)
 
-                return content, float(cost or 0.0), total_tokens
+                    content = response.choices[0].message.content or ""
+                    try:
+                        cost = completion_cost(completion_response=response)
+                    except Exception:
+                        cost = 0.0
 
-            except Exception as exc:
-                last_err = exc
-                attempt += 1
-                wait_time = 2**attempt
-                logger.warning(
-                    "LLM completion attempt failed",
-                    model=selected_model,
-                    attempt=attempt,
-                    error=str(exc),
-                    retry_in=wait_time,
-                )
-                if attempt < max_retries:
-                    await asyncio.sleep(wait_time)
+                    usage = getattr(response, "usage", None)
+                    total_tokens = usage.total_tokens if usage else 0
 
-        logger.error(
-            "LLM completion exhausted all retries",
-            model=selected_model,
-            error=str(last_err),
-        )
-        raise RuntimeError(
-            f"Failed LLM completion after {max_retries} attempts: {last_err}"
-        ) from last_err
+                    span.set_attribute(
+                        "gen_ai.response.model", getattr(response, "model", selected_model)
+                    )
+                    if usage:
+                        span.set_attribute("gen_ai.usage.input_tokens", usage.prompt_tokens)
+                        span.set_attribute("gen_ai.usage.output_tokens", usage.completion_tokens)
+                    span.set_attribute("evalforge.cost_usd", float(cost or 0.0))
+
+                    return content, float(cost or 0.0), total_tokens
+
+                except Exception as exc:
+                    last_err = exc
+                    attempt += 1
+                    wait_time = 2**attempt
+                    logger.warning(
+                        "LLM completion attempt failed",
+                        model=selected_model,
+                        attempt=attempt,
+                        error=str(exc),
+                        retry_in=wait_time,
+                    )
+                    if attempt < max_retries:
+                        await asyncio.sleep(wait_time)
+
+            if last_err is not None:
+                span.record_exception(last_err)
+            logger.error(
+                "LLM completion exhausted all retries",
+                model=selected_model,
+                error=str(last_err),
+            )
+            raise RuntimeError(
+                f"Failed LLM completion after {max_retries} attempts: {last_err}"
+            ) from last_err
 
 
 _client_instance: LiteLLMClient | None = None
