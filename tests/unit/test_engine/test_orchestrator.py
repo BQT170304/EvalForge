@@ -50,7 +50,11 @@ async def test_evaluate_creates_a_span_per_metric(traced_orchestrator):
 
 @pytest.mark.asyncio
 async def test_evaluate_records_exception_on_span_when_metric_fails(traced_orchestrator):
-    test_case = EvalTestCase(input="hi", output="hello")
+    # Distinct input/output from test_evaluate_creates_a_span_per_metric above: the
+    # orchestrator's cache is keyed on metric name + test case, and it's a
+    # process-wide singleton, so reusing that test's exact input/output here would
+    # cache-hit its passing result instead of exercising this metric's failure.
+    test_case = EvalTestCase(input="boom", output="boom")
 
     with patch("evalforge.engine.orchestrator.MetricRegistry.create") as mock_create:
         mock_metric = AsyncMock()

@@ -12,6 +12,7 @@ from evalforge.observability.metrics import (
     eval_requests_total,
     metric_failures_total,
 )
+from evalforge.utils.caching import get_cache
 
 from .base import (
     EvalTestCase,
@@ -44,25 +45,36 @@ class EvaluationOrchestrator:
         if parameters:
             cfg_map.update(parameters)
 
-        resolved_metrics = []
+        resolved_metrics: list[tuple[Any, dict[str, Any]]] = []
         for name in target_metrics:
             m_kwargs = cfg_map.get(name, {}).copy()
             if thresholds and name in thresholds:
                 m_kwargs["threshold"] = thresholds[name]
             try:
-                resolved_metrics.append(MetricRegistry.create(name, **m_kwargs))
+                resolved_metrics.append((MetricRegistry.create(name, **m_kwargs), m_kwargs))
             except ValueError as e:
                 logger.error("failed_to_load_metric", metric=name, error=str(e))
 
-        async def run_metric(metric: Any) -> MetricResult:
+        cache = get_cache()
+
+        async def run_metric(metric: Any, m_kwargs: dict[str, Any]) -> MetricResult:
             metric_name = getattr(metric, "name", "unknown")
             start_time = time.time()
             with tracer.start_as_current_span(
                 "evalforge.metric.evaluate",
                 attributes={"evalforge.metric_name": metric_name},
             ) as span:
+                cache_key = cache.generate_cache_key(metric_name, test_case, m_kwargs)
+                cached = await cache.get(cache_key)
+                if cached is not None:
+                    logger.debug("metric_cache_hit", metric=metric_name)
+                    span.set_attribute("evalforge.cache_hit", True)
+                    span.set_attribute("evalforge.score", cached.score)
+                    span.set_attribute("evalforge.passed", cached.passed)
+                    return cached
                 try:
                     res: MetricResult = await metric.evaluate(test_case)
+                    await cache.set(cache_key, res)
                     duration_ms = (time.time() - start_time) * 1000
                     eval_requests_total.add(1, {"metric_name": metric_name})
                     eval_latency_ms.record(duration_ms, {"metric_name": metric_name})
@@ -90,7 +102,7 @@ class EvaluationOrchestrator:
                         latency_ms=(time.time() - start_time) * 1000,
                     )
 
-        results = await asyncio.gather(*(run_metric(m) for m in resolved_metrics))
+        results = await asyncio.gather(*(run_metric(m, kw) for m, kw in resolved_metrics))
         return list(results)
 
     async def evaluate_batch(
